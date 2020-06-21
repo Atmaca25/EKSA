@@ -1,25 +1,24 @@
 import {
-    Platform,
-    StyleSheet,
-    Animated,
-    Image,
-    TouchableHighlight,
-    Alert,
-    Dimensions,
-    BackHandler,
-    WebView,
-    FlatList,
-    ActivityIndicator,
-    TouchableOpacity,
-    ImageBackground,
     View,
-    Text,
     AsyncStorage
   } from 'react-native';
-  import React from 'react';
+  import React,{Component} from 'react';
   import { Button, TextInput } from 'react-native-paper';
- 
-  class Account extends React.Component {
+  import IIcon from 'react-native-vector-icons/FontAwesome';
+  import LoginStore from '../src/store/LoginStore';
+  import IlacStore from '../src/store/IlacStore';
+  import axios from 'axios';
+//import { Icon } from 'react-native-paper/lib/typescript/src/components/Avatar/Avatar';
+import { observer } from 'mobx-react';
+import { runInAction } from 'mobx';
+import Toast, {DURATION} from 'react-native-easy-toast';
+import User from '../models/User';
+import DoctorProfile from '../models/DoctorProfile';
+import { CommonActions} from '@react-navigation/native'
+
+@observer
+export default class Login extends Component 
+  {
     constructor(props) {
       super(props);
       this.state = {
@@ -34,39 +33,98 @@ import {
         newMailAdress:'',
         newTelephoneNumber:'',
         newPersonalName:'',
-        newPersonalSurname:''
+        newPersonalSurname:'',
+        newIdentity:'',
+        newBirthDate:'',
+        newPhoto:'',
+        backgroundDisplay:355
       };
     }
- 
-    fetchData3 = () => {
-      this.setState({ loginLoading: true });
-      fetch(
-        'https://www.matmaca.com/api/Users/GetUser?username=' +
-          this.state.kullaniciAdi +
-          '&password=' +
-          this.state.sifre +
-          ''
-      )
-        .then(response => response.json())
-        .then(responseJson => {
-          this.setState({
-            loginLoading: false,
-          });
-          console.log(this.state.kullaniciAdi+this.state.sifre)
-          if (responseJson.length > 0) {
-            this.props.navigation.navigate('Reservation', {
-              username: this.state.kullaniciAdi,
-              password: this.state.sifre,
-            });
-            AsyncStorage.setItem('username',this.state.kullaniciAdi);
- 
-          } else {
-            this.setState({ errorPlaceholder: 'red' });
-          }
+    onPressGiris = ({navigation}) =>
+    {
+      //LoginStore.Login(this.state.kullaniciAdi,this.state.sifre , {navigation});
+      //navigation.navigate("HomeScreen");
+      this.Login();
+    }
+    Login =  () => 
+    {
+      let identity = this.state.kullaniciAdi;
+      let pass = this.state.sifre;
+      //console.log(`http://eksa.ml/api/Home/Login?identity=${identity}&pass=${pass}`);
+      
+      axios.get(`http://matmaca.com/api/Home/Login?identity=${identity}&pass=${pass}`)
+      .then(response => response.data)
+      .then(data => {
+        console.log(data);
+        if(data != null && data != "")
+        {
+          console.log("data => " + data)
+           this._loadData(data);
+           AsyncStorage.setItem('@isLoggin' , '1');
+           AsyncStorage.setItem('@token' , data);
+
+          runInAction(() => {LoginStore.login = true});
+          IlacStore._fillIlac(identity);
+          this.props.navigation.dispatch(
+            CommonActions.reset({
+              index: 1,
+              routes: [
+                { name: 'HomeScreen' },
+              ],
+            })
+          );
+          //this.props.navigation.navigate("HomeScreen");
+        }else
+        {
+          this.refs.toast.show('Girilen bilgiler geçersiz..');
+        }
+      } ,err => {
+        alert("Oops bir hata ile karşılaşıldı..." + err);
+      })
+
+    }
+    _loadData = (data) =>  
+    {
+        //let token = await AsyncStorage.getItem('@token');
+        axios.get(`http://matmaca.com/api/Home/getUser?token=${data}`)
+        .then(res => res.data[0])
+        .then( res => {
+            if(res.id != 0)
+            {
+                let model = new User(res.id , res.isActivity , res.userBirthDate , res.userEmail , res.userIdentityNumber , res.userImageSource , res.userPersonalName , res.userPersonalSurname , res.userPhoneNumber , res.userRol );
+                runInAction( () => { LoginStore.kisi = model; LoginStore.isim = model.getfullName(); LoginStore.rol = model.userRol == 2 ? 'Doktor':'Hasta'; });
+                if(model.userRol == 2)
+                {
+                  this._loadDoctor(model.userIdentityNumber);
+                }
+            }
+        },err=>{
+            alert("Oops bir şeyler ters gitti..")
         })
-        .catch(error => console.log(error));
-    };
- 
+    }
+    _loadDoctor = (identity) =>
+    {
+      console.log("Load Doctor");
+      axios.get(`http://matmaca.com/api/Home/getDoctorP?identity=${identity}`)
+      .then(res => res.data[0])
+      .then( res=>{
+        //constructor( identityNumber ,name , surname , title , section , hospital , adresse , district , province)
+        let model = new DoctorProfile(identity , res.name , res.surname , res.title , res.section , res.hospital , res.adresse , res.district , res.province);
+        runInAction( () => {LoginStore.doctorProfile = model});
+      },err=>{
+        alert("Oops bir şeyler ters gitti..")
+      })
+    }
+    setStorage = async (data) =>
+    {
+      await AsyncStorage.setItem('@isLoggin' , JSON.stringify('1'));
+      await AsyncStorage.setItem('@token' , JSON.stringify(data));
+
+      console.log("Login içerisinde");
+      console.log(AsyncStorage.getItem('@token'));
+      console.log(AsyncStorage.getItem('@isLoggin'));
+    }
+
     validateEmail = () => {
     var re = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d$&+,:;=?@#|'<>.^*()%!-]{8,}$/;
       if(!re.test(this.state.newPassword))
@@ -76,6 +134,42 @@ import {
       }
   };
  
+
+   signIn = () => 
+   {
+     this.setState({ loginLoading: true });
+      axios.get(`http://matmaca.com/api/Home/addUser?userIdentityNumber=${this.state.newIdentity}&userPersonalName=${this.state.newPersonalName}&userPersonalSurname=${this.state.newPersonalSurname}&userPhoneNumber=${this.state.newTelephoneNumber}&userEmail=${this.state.newMailAdress}&userBirthDate=${this.state.newBirthDate}&userPassword=${this.state.newPassword}&userImageSource=${this.state.newPhoto}`)
+      .then(res => res.data)
+      .then(res => {
+        if(res)
+        {
+          this.refs.toast.show('Kayıt Başarılı');
+          this.setState({
+            kullaniciAdi: '',
+            sifre:'',
+            newMailAdress:'',
+            newPassword:'',
+            newPersonalName:'',
+            newPersonalSurname:'',
+            newTelephoneNumber:'',
+            newIdentity:'',
+            newBirthDate:'',
+            newPhoto:'',
+            kayitDisplay:'none',
+            loginDisplay:'flex',
+            loginLoading:false,
+            backgroundDisplay:355
+          });
+        }else
+        {
+          this.refs.toast.show('Kayıt Başarısız.Kimlik Numaranızı kontrol ediniz...');
+        }
+
+        
+      }, err => {
+        alert("Oops bir hata ile karşılaşıldı..." + err);
+      })
+   }
    fetchData4 = (text) => {
      this.setState({ loginLoading: true });
      if(this.state.newPersonalName != "" && this.state.newPersonalSurname != "")
@@ -125,34 +219,30 @@ import {
           this.setState({ loginLoading: false });
       }
   }
- 
+
     render() {
+      let {navigation} = this.props;
       return (
         <View style={{ flex: 1, backgroundColor: 'transparent' }}>
           <View style={{ width: '100%', height: '100%', position: 'absolute' }}>
-            <Image
+            <View
               style={{
                 width: '100%',
                 height: '100%',
+                backgroundColor:'#266390',
               }}
-              resizeMethod={'scale'}
-              source={{
-                uri: 'https://www.jakpost.travel/wimages/large/0-1432_download-samsung-one-ui-background-wallpapers-samsung-one.jpg',
-              }}
+              
             />
-             <Image
+             <IIcon name="stethoscope" size = {this.state.backgroundDisplay} color="rgb(200,200,200)"
               style={{
                 width: '90%',
                 height: '50%',
-                marginLeft:'5%',
+                marginLeft:'18%',
                 marginTop:'5%',
                 position:'absolute',
-                display: this.state.loginDisplay
               }}
               resizeMethod={'scale'}
-              source={{
-                uri: 'https://upload.wikimedia.org/wikipedia/commons/3/36/Medicine_Barnstar_Hires.png',
-              }}
+              source={require('../assets/icons8-stethoscope-64.png')}
             />
           </View>
           <View
@@ -187,7 +277,7 @@ import {
                 marginTop: 10,
                 color: 'white',
               }}
-              label="Sifre"
+              label="Şifre"
               value={this.state.sifre}
               onChangeText={text =>
                 this.setState({ sifre: text, errorPlaceholder: 'white' })
@@ -204,13 +294,11 @@ import {
               }}
             />
             <Button
-              icon={{
-                uri:
-                  'https://cdn2.iconfinder.com/data/icons/ios-7-icons/50/user_male2-512.png',
-              }}
+              icon="account-circle-outline"
+              uppercase={false}
               mode="outlined"
               loading={this.state.loginLoading}
-              onPress={() => this.fetchData3()}
+              onPress={() => { this.onPressGiris({navigation});}}
               color={'black'}
               style={{
                 marginTop: 50,
@@ -219,13 +307,14 @@ import {
                 width: '90%',
                 color: 'black',
               }}>
-              Giris Yap
+              Giriş Yap
             </Button>
             <Button
-              icon={{ uri: 'http://cdn.onlinewebfonts.com/svg/img_202009.png' }}
+              icon="lock"
               mode="outlined"
+              uppercase={false}
               onPress={() =>
-                this.setState({ kayitDisplay: 'flex', loginDisplay: 'none' })
+                this.setState({ kayitDisplay: 'flex', loginDisplay: 'none',backgroundDisplay:0 })
               }
               color={'black'}
               style={{
@@ -235,7 +324,7 @@ import {
                 marginLeft: '5%',
                 width: '90%',
               }}>
-              Kayit Ol
+              Kayıt Ol
             </Button>
           </View>
           <View
@@ -246,64 +335,13 @@ import {
               marginTop: '3%',
               display: this.state.kayitDisplay,
               paddingLeft:20,
+              paddingRight:20,
               opacity:10
             }}>
             <TextInput
-              label="Username"
               mode="flat"
-              style={{ backgroundColor: 'transparent',borderRadius:15,opacity:5,marginTop:10 }}
-              selectionColor="white"
-              underlineColor="white"
-              value={this.state.newUsername}
-              onChangeText={text => this.setState({ newUsername: text })}
-              theme={{
-                colors: { text: 'white', placeholder: 'white', primary: 'white' },
-              }}
-            />
-            <TextInput
-              mode="flat"
-               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:15,opacity:5 }}
-              label="Password"
-              secureTextEntry={true}
-              value={this.state.newPassword}
-              onChangeText={text => this.setState({ newPassword: text })}
-              onBlur={() => {
-                this.validateEmail();
-              }}
-              selectionColor="white"
-              underlineColor="white"
-              theme={{
-                colors: { text: 'white', placeholder: 'white', primary: 'white' },
-              }}
-            />
-            <TextInput
-              label="E-Mail"
-              mode="flat"
-               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:15,opacity:5 }}
-              selectionColor="white"
-              underlineColor="white"
-              value={this.state.newMailAdress}
-              onChangeText={text => this.setState({ newMailAdress: text })}
-              theme={{
-                colors: { text: 'white', placeholder: 'white', primary: 'white' },
-              }}
-            />
-            <TextInput
-              mode="flat"
-               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:15,opacity:5 }}
-              label="Phone Number"
-              value={this.state.newTelephoneNumber}
-              onChangeText={text => this.setState({ newTelephoneNumber: text })}
-              selectionColor="white"
-              underlineColor="white"
-              theme={{
-                colors: { text: 'white', placeholder: 'white', primary: 'white' },
-              }}
-            />
-              <TextInput
-              mode="flat"
-               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:15,opacity:5 }}
-              label="Personal Name"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Adınız"
               value={this.state.newPersonalName}
               onChangeText={text => this.setState({ newPersonalName: text })}
               selectionColor="white"
@@ -314,8 +352,8 @@ import {
             />
              <TextInput
               mode="flat"
-               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:15,opacity:5 }}
-              label="Personal Surname"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Soyadınız"
               value={this.state.newPersonalSurname}
               onChangeText={text => this.setState({ newPersonalSurname: text })}
               selectionColor="white"
@@ -324,14 +362,88 @@ import {
                 colors: { text: 'white', placeholder: 'white', primary: 'white' },
               }}
             />
-            <Button
-              icon={{
-                uri:
-                  'https://cdn2.iconfinder.com/data/icons/ios-7-icons/50/user_male2-512.png',
+            
+            <TextInput
+              label="Kimlik Numaranız"
+              mode="flat"
+              style={{ backgroundColor: 'transparent',borderRadius:15,opacity:5,marginTop:10 }}
+              selectionColor="white"
+              underlineColor="white"
+              value={this.state.newIdentity}
+              onChangeText={text => this.setState({ newIdentity: text })}
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
               }}
+            />
+               
+            <TextInput
+              label="E-Mail"
+              mode="flat"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              selectionColor="white"
+              underlineColor="white"
+              value={this.state.newMailAdress}
+              onChangeText={text => this.setState({ newMailAdress: text })}
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
+              }}
+            />
+            <TextInput
+              mode="flat"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Telefon Numarası"
+              value={this.state.newTelephoneNumber}
+              onChangeText={text => this.setState({ newTelephoneNumber: text })}
+              selectionColor="white"
+              underlineColor="white"
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
+              }}
+            />
+            <TextInput
+              mode="flat"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Doğum Tarihi"
+              value={this.state.newBirthDate}
+              onChangeText={text => this.setState({ newBirthDate: text })}
+              selectionColor="white"
+              underlineColor="white"
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
+              }}
+            />
+            <TextInput
+              mode="flat"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Fotoğraf"
+              value={this.state.newPhoto}
+              onChangeText={text => this.setState({ newPhoto: text })}
+              selectionColor="white"
+              underlineColor="white"
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
+              }}
+            />
+            <TextInput
+              mode="flat"
+               style={{ backgroundColor: 'transparent',borderRadius:15,marginTop:10,opacity:5 }}
+              label="Şifre"
+              secureTextEntry={true}
+              value={this.state.newPassword}
+              onChangeText={text => this.setState({ newPassword: text })}
+              selectionColor="white"
+              underlineColor="white"
+              theme={{
+                colors: { text: 'white', placeholder: 'white', primary: 'white' },
+              }}
+            />
+            
+              
+            <Button
+              icon="lock"
               loading={this.state.loginLoading}
               mode="outlined"
-              onPress={() => this.fetchData4('')}
+              onPress={() => {this.signIn()}}
               color={'black'}
               style={{
                 marginTop: 50,
@@ -339,14 +451,14 @@ import {
                 color: 'black',
                 marginRight:'5%'
               }}>
-              Kayit Ol
+              Kayıt Ol
             </Button>
              <Button
               color={'black'}
-              icon={{ uri: 'http://cdn.onlinewebfonts.com/svg/img_202009.png' }}
+              icon="account-circle-outline"
               mode="outlined"
               onPress={() =>
-                this.setState({ kayitDisplay: 'flex', loginDisplay: 'flex',loading:true })
+                this.setState({ kayitDisplay: 'flex', loginDisplay: 'flex',loading:true,backgroundDisplay:355 })
               }
               style={{
                 marginTop: 10,
@@ -354,12 +466,13 @@ import {
                 color: 'black',
                 marginRight:'5%'
               }}>
-              Giris Yap
+              Giriş Yap
             </Button>
+            
           </View>
+          <Toast ref="toast"/>
         </View>
       );
     }
   }
  
-  export default Account;

@@ -37,7 +37,6 @@ class AlternatifLogin extends Component
     )
   }
 }
-
 const styles = StyleSheet.create({
   aComp:
   {
